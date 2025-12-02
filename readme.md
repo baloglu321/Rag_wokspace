@@ -19,6 +19,7 @@ graph TD
     E -->|Select Top-10| F{Refined Context}
     F -->|Context + Prompt| G[LLM - Gemma:27b]
     G --> H[Final Answer]
+```
 
 The final architecture is heavily optimized in the Retrieval phase to maximize the likelihood of fetching all necessary context pieces for complex synthesis. 
 
