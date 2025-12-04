@@ -11,7 +11,7 @@ import time
 import os
 
 
-CLOUDFLARE_TUNNEL_URL = "https://sol-garbage-stability-slight.trycloudflare.com/"
+CLOUDFLARE_TUNNEL_URL = ".../"
 OLLAMA_MODEL_ID = "gemma3:27b"
 RERANKER_MODEL_NAME = "cross-encoder/ms-marco-TinyBERT-L-2"
 CHROMA_HOST = "localhost"  # Sadece ana bilgisayar adı
