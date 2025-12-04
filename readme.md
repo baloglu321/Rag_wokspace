@@ -1,24 +1,42 @@
-# 🚀 Advanced RAG (Retrieval-Augmented Generation) System
+# 🚀 Advanced Hybrid RAG System with Citation & Re-ranking
 
-## 🌟 Project Overview: From Naive RAG to High-Precision Retrieval
+## 🌟 Project Overview
 
-This project documents the journey of building a RAG system, starting with the basic **Naive RAG** architecture and progressively optimizing it to handle **Multilingual** and **complex Multi-Hop** inference queries with high accuracy.
+This project represents a **production-ready RAG (Retrieval-Augmented Generation) architecture**. It evolves beyond standard vector search by implementing **Hybrid Search (BM25 + Dense Retrieval)**, **Cross-Encoder Re-ranking**, and **Strict Source Citation**.
 
-The core achievement is ensuring the Large Language Model (LLM) adheres strictly to the provided context (**Grounding**), effectively eliminating hallucinations across diverse and challenging datasets.
+The system is designed to handle **Multilingual (Turkish/English)** queries, complex **Multi-Hop reasoning**, and high-precision technical Q&A without hallucinations.
 
 ---
 
-## 🏗️ Architecture and Core Components
+## 🔥 Key Features & Upgrades
+
+| Feature | Description | Status |
+| :--- | :--- | :--- |
+| **Hybrid Search** | Combines **BM25 (Keyword)** and **ChromaDB (Semantic)** search via `EnsembleRetriever` to capture both exact terminology and conceptual meaning. | ✅ **Active** |
+| **Source Citation** | The LLM explicitly cites sources for every claim (e.g., `[Source: document.pdf]`), ensuring transparency and trust. | ✅ **Active** |
+| **Re-ranking** | Uses a **Cross-Encoder** (`ms-marco-TinyBERT`) to score and filter the top retrieved documents, significantly boosting precision. | ✅ **Active** |
+| **Smart Ingestion** | The database script checks existing IDs to prevent duplicate embeddings, optimizing cost and speed during updates. | ✅ **Active** |
+| **Multilingual** | Optimized for both Turkish and English using `paraphrase-multilingual-mpnet-base-v2`. | ✅ **Active** |
+
+---
+
+## 🏗️ Architecture
+
+The system uses a "Retrieve & Re-rank" pipeline enhanced with Hybrid Search logic.
 
 ```mermaid
 graph TD
-    A[User Query] -->|Embed| B(Embedding Model)
-    B -->|Search| C[(Vector DB - Chroma)]
-    C -->|Retrieve Top-30| D[Raw Results]
-    D -->|Re-Rank| E[Cross-Encoder]
-    E -->|Select Top-10| F{Refined Context}
-    F -->|Context + Prompt| G[LLM - Gemma:27b]
-    G --> H[Final Answer]
+    A[User Query] --> B{Hybrid Retrieval}
+    B -->|Semantic Search| C[(ChromaDB - Vector)]
+    B -->|Keyword Search| D[BM25 Retriever]
+    C --> E[Top-20 Docs]
+    D --> E
+    E -->|Ensemble| F[Unified Candidate Pool]
+    F -->|Re-Rank| G[Cross-Encoder Model]
+    G -->|Filter Top-5| H[Final Context with Metadata]
+    H -->|Context + Prompt| I[LLM - Gemma:27b]
+    I --> J[Final Answer with Citations]
+```
 
 The final architecture is heavily optimized in the Retrieval phase to maximize the likelihood of fetching all necessary context pieces for complex synthesis. 
 
@@ -33,17 +51,37 @@ The final architecture is heavily optimized in the Retrieval phase to maximize t
 | **Dataset** | Clean, structured data for robust testing. | SQuAD and SQuAD-TR (JSON format) | Enables quantifiable testing of Grounding and inference capabilities. |
 
 ---
-
+## 📂 Project Structure
 .
-├── database/               # SQuAD JSON files & ChromaDB data
-├── croma_db_update.py      # Script to vectorise data
-├── native_rag.py           # Main RAG execution script
-├── requirements.txt        # Python dependencies
+├── database/                   # SQuAD JSON files & Source Documents
+├── croma_db_update.py          # Smart Ingestion: Vectors (Chroma) + Keywords (BM25)
+├── hybrid_reranking_rag.py     # MAIN SCRIPT: Hybrid Search + Rerank + Citation
+├── native_rag.py               # Legacy Script: Standard Vector Search (for comparison)
+├── requirements.txt            # Python dependencies
 └── README.md
 
-## 🛠️ Optimization Strategies Implemented
+## 🛠️ Optimization Details
 
-The following techniques were successfully integrated to stabilize performance and solve critical limitations like the **"Lost in the Middle"** problem and **Multilingual misalignment**.
+1. Hybrid Search (The "Pauli Principle" Effect)
+Standard vector search often fails on specific technical terms (e.g., "Pauli exclusion principle") if the semantic embedding is too generic.
+
+Solution: We use EnsembleRetriever (Weights: 0.5 Vector / 0.5 BM25).
+
+Result: BM25 catches exact keywords, while Chroma catches the semantic meaning.
+
+2. Strict Citation Prompting
+To prevent hallucinations, the prompt is engineered to treat the context as the only source of truth.
+
+Mechanism: Context chunks are injected with headers: [Source: filename | title].
+
+Instruction: "When answering, you MUST cite the source filename."
+
+3. Smart Database Update
+croma_db_update.py now includes logic to skip already indexed documents:
+
+ChromaDB: Skips existing IDs (Prevents disk bloat).
+
+BM25: Always re-indexes in memory (Required for statistical accuracy).
 
 ### Optimization Summary Table
 
@@ -71,9 +109,9 @@ Install all necessary Python dependencies:
 ```bash
 pip install -r requirements.txt
 ```
-### 2. Database Initialization
+### 2. Ingest Data (Smart Update)
 
-Start the server and load your data (assuming your SQuAD JSON files are in the database/ folder):
+Loads your JSON/PDF data into ChromaDB.
 
 ```bash
 # a) Start the ChromaDB Docker Container
@@ -81,7 +119,9 @@ docker run -d -p 8000:8000 chromadb/chroma
 
 # b) Run the Update script to load and vectorize data (Run once initially)
 python croma_db_update.py
+
 ```
+Output: ⏭️ Atlanan (Zaten Var): 46106 (Shows efficient skipping of existing data).
 
 ### 3. Execute Queries
 
@@ -90,31 +130,34 @@ Run the main script to connect to the optimized database and execute the RAG tes
 ```bash
 python native_rag.py
 ```
+or Execute the main script to query with Hybrid Search and Citations.
+```bash
+python hybrid_reranking_rag.py
+```
 
-### 4. 🔬 RAG Query Tests and Final Results
-This section presents the final test results demonstrating the successful performance of the optimized RAG chain (Multilingual Embedding + Cross-Encoder Re-ranking + Gemma:27b) on diverse, structured datasets.
+### 🔬 Performance & Citation Examples
+TThe following results demonstrate the system's ability to provide accurate, grounded answers with citations.
 
-## 1. Turkish Test Results (Multilingual and Inference)
+🇹🇷 Turkish Test (Complex Inference)
+Query: "Normanların eski İskandinav dinini ve dilini bırakıp... adaptasyon süreci nasıldı?"
 
-The system successfully handled complex Turkish queries and adhered to the language constraint ("MUST answer in the SAME LANGUAGE as the question").
+✅ Gemma Response: Rollo'nun Vikinglerinin torunları ve Frenk eşleri İskandinav dinini ve Eski İskandinav dilini Katoliklik (Hıristiyanlık) ve yerel halkın Gallo-Romance dilinin yerini alacaktı... ([Source: squad-tr-dev-v1.0.0-excluded.json | Normanlar]). Sonunda Normanlar diller ve gelenekleri birleştirerek yerlilerle birleşti ([Source: squad-tr-dev-v1.0.0-excluded.json | Normanlar]).
 
-| Query (Turkish) | Answer (Gemma:27b) |
-| :--- | :--- |
-| **Rollo'nun Vikinglerinin torunları hangi dili ve dini benimsedi?** | Rollo'nun Vikinglerinin torunları Katolikliği (Hıristiyanlık) ve yerel halkın Gallo-Romance dilini benimsedi. |
-| **Normanların eski İskandinav dinini ve dilini bırakıp, yerel halkın dinini ve dilini benimsemesindeki temel kültürel adaptasyon süreci nasıldı?** | Normanlar, eski İskandinav dinini ve dilini bırakıp Katolikliği (Hıristiyanlığı) ve yerel halkın Gallo-Romance dilini benimsemiştir. Bu süreçte, annelik Frenk mirasını Eski İskandinav gelenekleriyle birleştirerek Fransa'nın kuzeyinde benzersiz bir “Norman” kültürü oluşturmuşlardır. Norman dili, Norveççe konuşan bir iktidar sınıfı tarafından Romance yerli langue d'oïl şubesinin benimsenmesiyle oluşmuştur. Ayrıca, Normanlar Fransa'nın feodal doktrinlerini benimsemiş ve Normandiya ve İngiltere'de hiyerarşik bir sistem kurmuşlardır. Zamanla, Normanlar yerel halkla birleşerek dillerini ve geleneklerini harmanlamışlardır. |
-| **Sürtünme gibi muhafazakar olmayan kuvvetler, neden aslında mikroskobik potansiyellerin sonuçları olarak kabul edilir?** | Sürtünme dışındaki muhafazakar olmayan kuvvetler temas kuvvetleri, gerginlik, sıkıştırma ve sürükleme gibi kuvvetlerdir. Yeterince ayrıntılı bir açıklama için, tüm bu kuvvetlerin mikroskobik potansiyellerin gradyanlarının net sonuçları olduğu kabul edilir. Bu kuvvetler makroskopik kuvvetlerdir. Ancak, verilen bağlam bu konuyu tam olarak açıklamıyor. |
+🇺🇸 English Test (Specific Physics Terminology)
+Query: "Why are non-conservative forces like friction considered results of microscopic potentials?"
 
+✅ Gemma Response: Friction is a manifestation of the electromagnetic force acting between atoms of two surfaces and the Pauli exclusion principle that does not allow atoms to pass through each other ([Source: squad-tr-dev-v1.0.0-excluded.json | Kuvvet]). It is generally impossible to model these forces as gradients of potentials... ([Source: squad-tr-dev-v1.0.0-excluded.json | Kuvvet]).
 
-## 2. English Test Results (Multi-Hop and Factual Detail)
+(Note: The Hybrid system successfully retrieved the "Pauli exclusion principle" keyword, which the standard vector search missed.)
 
-The system demonstrated high retrieval precision and accurate multi-hop synthesis on English-language SQuAD data.
+### 📊 Performance Comparison
 
-| Query (English) | Answer (Gemma:27b) |
-| :--- | :--- |
-| **What is the metric term less used than the Newton, and what is it sometimes referred to?** |The kilogram-force (kgf) is the metric counterpart to the pound-force, and is sometimes referred to as kilopond. |
-| **What is the location of the grotto that the University of Notre Dame's grotto is a replica of, where the Virgin Mary allegedly appeared in 1858?** | The University of Notre Dame's grotto is a replica of the grotto at Lourdes, France where the Virgin Mary reputedly appeared to Saint Bernadette Soubirous in 1858. |
-| **Why were the traditional Roman numerals (L) not used for Super Bowl 50?** | The primary reason for the change was the difficulty of designing an aesthetically pleasing logo with the letter "L" using the standardized logo template introduced at Super Bowl XLV. The league emphasized the "golden anniversary" and wanted the logo to prominently feature the Arabic numerals 50. |
-
+| Metric | Native RAG (Vector Only) | Hybrid RAG (Vector + BM25) |
+| :--- | :--- | :--- |
+| **Technical Precision** | ⭐⭐⭐ (Good) | ⭐⭐⭐⭐ (Excellent) |
+| **Citation Capability** | ❌ No | ✅ Yes |
+| **Retrieval Method** | Similarity Search | Ensemble (Sparse + Dense) |
+| **Handling Specific Terms** | Moderate | High (Thanks to BM25) |
 
 ### 📈 Conclusion: Performance Validation
 

@@ -5,11 +5,13 @@ from langchain_classic.prompts import PromptTemplate
 from sentence_transformers import CrossEncoder
 from langchain_classic.chains.llm import LLMChain
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_classic.retrievers import EnsembleRetriever
+from croma_db_update import update_db_with_feedback
 import time
 import os
-from croma_db_update import update_db_with_feedback
 
-CLOUDFLARE_TUNNEL_URL = ".../"
+
+CLOUDFLARE_TUNNEL_URL = "https://sol-garbage-stability-slight.trycloudflare.com/"
 OLLAMA_MODEL_ID = "gemma3:27b"
 RERANKER_MODEL_NAME = "cross-encoder/ms-marco-TinyBERT-L-2"
 CHROMA_HOST = "localhost"  # Sadece ana bilgisayar adı
@@ -20,28 +22,35 @@ reranker = CrossEncoder(RERANKER_MODEL_NAME)
 # 1. Veritabanını Güncelle ve VectorStore'u Al
 print("--- 1. Veritabanı Güncelleme ---")
 
-TOP_K_RETRIEVAL = 30  # ChromaDB'den çekilecek toplam parça sayısı
-TOP_K_RERANK = 10  # LLM'e gönderilecek nihai parça sayısı
+TOP_K_RETRIEVAL = 20  # ChromaDB'den çekilecek toplam parça sayısı
+TOP_K_RERANK = 5  # LLM'e gönderilecek nihai parça sayısı
 
 
-def get_reranked_documents(vectorstore: Chroma, query: str):
+def get_hybrid_reranked_docs(ensemble_retriever, query):
     """ChromaDB'den çok sayıda parça çeker ve bunları Cross-Encoder ile yeniden sıralar."""
 
-    # 1. ChromaDB'den daha fazla parça çekme (k=10)
-    retrieved_docs = vectorstore.similarity_search(query, k=TOP_K_RETRIEVAL)
+    # 3. İlk Geniş Havuz (Keyword + Vector sonuçlarının karışımı)
+
+    first_pass_docs = ensemble_retriever.invoke(query)
 
     # 2. Yeniden Sıralama için Veri Hazırlama
+
     # Cross-Encoder, (sorgu, metin) çiftleri listesi ister.
-    sentences = [(query, doc.page_content) for doc in retrieved_docs]
+
+    sentences = [(query, doc.page_content) for doc in first_pass_docs]
 
     # 3. Puanlama (Score)
+
     # Model, her parça için 0-1 arasında bir alaka puanı hesaplar.
+
     scores = reranker.predict(sentences)
 
     # 4. Parçaları Puanlarla Birleştirme ve Sıralama
-    doc_scores = sorted(zip(retrieved_docs, scores), key=lambda x: x[1], reverse=True)
+
+    doc_scores = sorted(zip(first_pass_docs, scores), key=lambda x: x[1], reverse=True)
 
     # 5. En iyi (TOP_K_RERANK) parçayı seçme
+
     final_docs = [doc_score[0] for doc_score in doc_scores[:TOP_K_RERANK]]
 
     return final_docs
@@ -91,14 +100,19 @@ def create_reranked_rag_chain(vectorstore: Chroma):
     return llm, RAG_PROMPT
 
 
-def test_reranked_rag_query(llm, prompt, vectorstore, query: str):
+def test_reranked_rag_query(
+    llm,
+    prompt,
+    ensemble_retriever,
+    query: str,
+):
     """Yeniden sıralama mantığını uygulayarak sorguyu çalıştırır ve sonuçları yazdırır."""
     start_time = time.time()
     print(f"\nSorgu: {query}")
     print("-" * 50)
 
     # 1. Yeniden Sıralamayı Uygula (Retrieval + Reranking)
-    final_docs = get_reranked_documents(vectorstore, query)
+    final_docs = get_hybrid_reranked_docs(ensemble_retriever, query=query)
 
     # 2. Bağlamı Hazırla
     context_list = []
@@ -148,8 +162,10 @@ if __name__ == "__main__":
 
     # 3. Var olan koleksiyona bağlanın (Yükleme yapmadan)
     vectorstore, bm25_retriever = update_db_with_feedback(
-        "/home/mbaloglu/Rag/database/", client, "rag_test_data", bm_ret=False
+        "/home/mbaloglu/Rag/database/", client, "rag_test_data", bm_ret=True
     )
+    if bm25_retriever == False:
+        print("HATA!!!!!")
 
     print("Mevcut veritabanı koleksiyonuna başarıyla bağlanıldı.")
     # 2. LLM ve Prompt'u Al
@@ -157,13 +173,17 @@ if __name__ == "__main__":
     llm_model, rag_prompt = create_reranked_rag_chain(vectorstore)
     print("Yeniden Sıralama (Re-ranking) Modeli ve LLM hazır.")
 
-    # 3. Zorlu Sorguları Çalıştır
+    chroma_retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
+
+    ensemble_retriever = EnsembleRetriever(
+        retrievers=[bm25_retriever, chroma_retriever], weights=[0.5, 0.5]
+    )
 
     # 1. Türkçe Factual Sorgu (Bu zaten Türkçe kaldı)
     test_reranked_rag_query(
         llm_model,
         rag_prompt,
-        vectorstore,
+        ensemble_retriever,
         query="Rollo'nun Vikinglerinin torunları hangi dili ve dini benimsedi?",
     )
 
@@ -172,7 +192,7 @@ if __name__ == "__main__":
     test_reranked_rag_query(
         llm_model,
         rag_prompt,
-        vectorstore,
+        ensemble_retriever,
         query="What is the metric term less used than the Newton, and what is it sometimes referred to?",
     )
 
@@ -181,7 +201,7 @@ if __name__ == "__main__":
     test_reranked_rag_query(
         llm_model,
         rag_prompt,
-        vectorstore,
+        ensemble_retriever,
         query="What is the location of the grotto that the University of Notre Dame's grotto is a replica of, where the Virgin Mary allegedly appeared in 1858?",
     )
 
@@ -189,13 +209,13 @@ if __name__ == "__main__":
     test_reranked_rag_query(
         llm_model,
         rag_prompt,
-        vectorstore,
+        ensemble_retriever,
         query="Normanların eski İskandinav dinini ve dilini bırakıp, yerel halkın dinini ve dilini benimsemesindeki temel kültürel adaptasyon süreci nasıldı?",
     )
     test_reranked_rag_query(
         llm_model,
         rag_prompt,
-        vectorstore,
+        ensemble_retriever,
         query="Sürtünme gibi muhafazakar olmayan kuvvetler, neden aslında mikroskobik potansiyellerin sonuçları olarak kabul edilir?",
     )
     # 5. İNGİLİZCE Multi-Hop/Detay Sorgu (Super Bowl)
@@ -203,6 +223,6 @@ if __name__ == "__main__":
     test_reranked_rag_query(
         llm_model,
         rag_prompt,
-        vectorstore,
+        ensemble_retriever,
         query="Why were the traditional Roman numerals (L) not used for Super Bowl 50?",
     )

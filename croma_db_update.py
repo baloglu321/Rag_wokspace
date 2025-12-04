@@ -4,6 +4,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from chromadb.errors import NotFoundError
+from langchain_community.retrievers import BM25Retriever
 import hashlib
 import os
 import json
@@ -30,8 +31,8 @@ def db_update():
         print("Koleksiyon zaten mevcut değil. Yeni koleksiyon oluşturulacak.")
     # 5. Chroma Veri Deposu Oluşturma (Bağlantılı)
     # Vektörler bu koleksiyona yüklenir.
-    vectorstore = update_db_with_feedback(
-        FILE_PATH, client=client, collection_name=COLLECTION_NAME
+    vectorstore, bm25_retriever = update_db_with_feedback(
+        FILE_PATH, client=client, collection_name=COLLECTION_NAME, bm_ret=False
     )
 
     print(
@@ -113,7 +114,7 @@ def get_chunks_with_ids(
 
 
 def update_db_with_feedback(
-    file_dir_path: str, client: chromadb.HttpClient, collection_name: str
+    file_dir_path: str, client: chromadb.HttpClient, collection_name: str, bm_ret=False
 ):
     """
     Veritabanını günceller, mevcut parçaları kontrol eder ve geri bildirim sağlar.
@@ -151,76 +152,56 @@ def update_db_with_feedback(
     chunks_to_add = []
     ids_to_add = []
 
-    # Hangi parçaların yeni, hangilerinin güncelleneceğini belirleme (loglama için)
+    # Sayaçlar
     new_count = 0
-    updated_count = 0
+    skipped_count = 0  # Güncelleme yerine "Atlanan" sayacı
 
     for i, chunk_id in enumerate(ids):
         if chunk_id in existing_ids_set:
-            # ID zaten var, bu OVERWRITE (güncelleme) olacak
-            updated_count += 1
-            # Güncelleme de ekleme işlemiyle aynıdır
-            chunks_to_add.append(all_chunks[i])
-            ids_to_add.append(chunk_id)
+            # HATANIN KAYNAĞI BURASIYDI:
+            # Eskiden buraya ekliyordun, şimdi sadece sayacı artırıp geçiyoruz.
+            skipped_count += 1
+            continue  # Listeye eklemeden bir sonraki döngüye geç
         else:
-            # ID yok, bu yeni bir ekleme olacak
+            # ID yok, bu gerçekten yeni bir veri
             new_count += 1
             chunks_to_add.append(all_chunks[i])
             ids_to_add.append(chunk_id)
 
-    # Yükleme (LangChain'in add_documents metodu hem yeni ekler hem de var olan ID'leri günceller)
+    # Yükleme Kısmı
+    # Eğer eklenecek yeni parça varsa batch işlemine gir
     if chunks_to_add:
-        # 1. Yükleme işlemini parçalara (batch) ayırıyoruz
+        print(f"🚀 {len(chunks_to_add)} yeni parça tespit edildi, yükleniyor...")
+
+        # ... Batch döngüsü (senin kodunla aynı) ...
         num_chunks = len(chunks_to_add)
-
-        # for döngüsü ile 0'dan başlayarak, MAX_BATCH_SIZE adımlarıyla ilerle
         for i in range(0, num_chunks, MAX_BATCH_SIZE):
-
-            # Başlangıç ve bitiş indexlerini belirle
             end_index = min(i + MAX_BATCH_SIZE, num_chunks)
-
-            # Chunk ve ID'leri bu batch için ayır
             batch_chunks = chunks_to_add[i:end_index]
             batch_ids = ids_to_add[i:end_index]
 
             print(
                 f"   -> Batch {int(i/MAX_BATCH_SIZE) + 1}: {len(batch_chunks)} parça yükleniyor..."
             )
-
             try:
-                # 2. Batch'i yükle
                 vectorstore.add_documents(documents=batch_chunks, ids=batch_ids)
-
             except Exception as e:
-                print(
-                    f"!!! YÜKLEME HATASI BATCH {int(i/MAX_BATCH_SIZE) + 1} !!! Hata: {e}"
-                )
-                # Hata durumunda döngüden çıkılabilir veya hata loglanıp devam edilebilir
+                print(f"!!! HATA: {e}")
                 break
+    else:
+        print("✨ Eklenecek yeni veri yok. Veritabanı güncel.")
 
     print(f"\n--- Yükleme Özeti ---")
-    print(f"Toplam Parça İşlendi: {len(all_chunks)}")
-    print(f"✅ Yeni Eklendi: {new_count} adet parça.")
-    print(f"🔄 Güncellendi (Overwrite Edildi): {updated_count} adet parça.")
-    print("Veritabanı başarıyla güncellendi (Batching Kullanıldı).")
+    print(f"Toplam Kaynak Parça: {len(all_chunks)}")
+    print(f"⏭️  Atlanan (Zaten Var): {skipped_count}")
+    print(f"✅ Yeni Eklenen: {new_count}")
+    if bm_ret == True:
+        bm25_retriever = BM25Retriever.from_documents(all_chunks)
+        bm25_retriever.k = 10
+    else:
+        bm25_retriever = False
 
-    return vectorstore
-
-
-def test(vectorstore):
-    query = "Cem Yılmaz'ın oynadığı karakterin logar ile ilgili ilginç bir sözü neydi?"
-
-    # En alakalı 3 adet parçayı (chunk) getir.
-    retrieved_docs = vectorstore.similarity_search(query, k=3)
-
-    print(f"\nSorgu: '{query}'")
-    print("-" * 40)
-    print(f"ChromaDB'den Gelen {len(retrieved_docs)} En Alakalı Parça:")
-
-    for i, doc in enumerate(retrieved_docs):
-        print(f"\n--- Parça {i+1} ---")
-        print(f"Kaynak: {doc.metadata.get('source', 'Bilinmiyor')}")
-        print(doc.page_content[:250] + "...")
+    return vectorstore, bm25_retriever
 
 
 if __name__ == "__main__":
