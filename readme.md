@@ -91,7 +91,6 @@ Run the main script to connect to the optimized database and execute the RAG tes
 ```bash
 python native_rag.py
 ```
-
 ### 4. 🔬 RAG Query Tests and Final Results
 This section presents the final test results demonstrating the successful performance of the optimized RAG chain (Multilingual Embedding + Cross-Encoder Re-ranking + Gemma:27b) on diverse, structured datasets.
 
