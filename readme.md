@@ -23,7 +23,7 @@ The system is designed to handle **Multilingual (Turkish/English)** queries, com
 ## 🏗️ Architecture
 
 The system uses a "Retrieve & Re-rank" pipeline enhanced with Hybrid Search logic.
-
+# Hybrit:
 ```mermaid
 graph TD
     A[User Query] --> B{Hybrid Retrieval}
@@ -36,6 +36,17 @@ graph TD
     G -->|Filter Top-5| H[Final Context with Metadata]
     H -->|Context + Prompt| I[LLM - Gemma:27b]
     I --> J[Final Answer with Citations]
+```
+# Only vector search:
+```mermaid
+graph TD
+    A[User Query] -->|Embed| B(Embedding Model)
+    B -->|Search| C[(Vector DB - Chroma)]
+    C -->|Retrieve Top-30| D[Raw Results]
+    D -->|Re-Rank| E[Cross-Encoder]
+    E -->|Select Top-10| F{Refined Context}
+    F -->|Context + Prompt| G[LLM - Gemma:27b]
+    G --> H[Final Answer]
 ```
 
 The final architecture is heavily optimized in the Retrieval phase to maximize the likelihood of fetching all necessary context pieces for complex synthesis. 
